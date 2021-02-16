@@ -40,6 +40,13 @@ namespace net.r_eg.MvsSln.Core
     /// </summary>
     public class SlnParser: ISlnContainer
     {
+        public ExceptionThrower Thrower { get; } = new ExceptionThrower();
+        public bool ShouldThrowErrorsInStrictMode
+        {
+            get { return Thrower.ShouldThrowErrorsInStrictMode; }
+            set { Thrower.ShouldThrowErrorsInStrictMode = value; }
+        }
+
         /// <summary>
         /// The name of file if used stream from memory.
         /// </summary>
@@ -99,7 +106,8 @@ namespace net.r_eg.MvsSln.Core
         public ISlnResult Parse(string sln, SlnItems type)
         {
             if(string.IsNullOrWhiteSpace(sln)) {
-                throw new ArgumentNullException(nameof(sln), MsgResource.ValueNoEmptyOrNull);
+                Thrower.Throw(new ArgumentNullException(nameof(sln), MsgResource.ValueNoEmptyOrNull), sln);
+                return null;
             }
 
             using var reader = new StreamReader(sln, encoding);
@@ -114,8 +122,10 @@ namespace net.r_eg.MvsSln.Core
         /// <returns></returns>
         public ISlnResult Parse(StreamReader reader, SlnItems type)
         {
-            if(reader == null) {
-                throw new ArgumentNullException(nameof(reader), MsgResource.ValueNoEmptyOrNull);
+            if(reader == null)
+            {
+                Thrower.Throw(new ArgumentNullException(nameof(reader), MsgResource.ValueNoEmptyOrNull));
+                return null;
             }
 
             string sln = (reader.BaseStream is FileStream) ? ((FileStream)reader.BaseStream).Name : MEM_FILE;
@@ -145,7 +155,10 @@ namespace net.r_eg.MvsSln.Core
 
             if((type & SlnItems.Env) == SlnItems.Env)
             {
-                data.Env = new IsolatedEnv(data, RawXmlProjects);
+                var Env = new IsolatedEnv(data, RawXmlProjects);
+                Env.ShouldThrowErrorsInStrictMode = this.ShouldThrowErrorsInStrictMode;
+
+                data.Env = Env;
                 if((type & SlnItems.EnvWithMinimalProjects) == SlnItems.EnvWithMinimalProjects) {
                     data.Env.LoadMinimalProjects();
                 }

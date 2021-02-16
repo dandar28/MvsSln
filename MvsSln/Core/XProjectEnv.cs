@@ -43,6 +43,13 @@ namespace net.r_eg.MvsSln.Core
     /// </summary>
     public class XProjectEnv: IXProjectEnv
     {
+        public ExceptionThrower Thrower { get; } = new ExceptionThrower();
+        public bool ShouldThrowErrorsInStrictMode
+        {
+            get { return Thrower.ShouldThrowErrorsInStrictMode; }
+            set { Thrower.ShouldThrowErrorsInStrictMode = value; }
+        }
+
         [Obsolete("Use " + nameof(PropertyNames), false)]
         public const string PROP_VALUE_DEFAULT = PropertyNames.UNDEFINED;
 
@@ -224,11 +231,13 @@ namespace net.r_eg.MvsSln.Core
         public Project GetOrLoadProject(ProjectItem pItem, IDictionary<string, string> properties)
         {
             if(String.IsNullOrWhiteSpace(pItem.pGuid)) {
-                throw new ArgumentException($"GUID of project is empty or null ['{pItem.name}', '{pItem.fullPath}']");
+                Thrower.Throw(new ArgumentException($"GUID of project is empty or null ['{pItem.name}', '{pItem.fullPath}']"));
+                return null;
             }
 
             if(!properties.ContainsKey(PropertyNames.CONFIG) || !properties.ContainsKey(PropertyNames.PLATFORM)) {
-                throw new ArgumentException($"Properties does not contain {PropertyNames.CONFIG} or {PropertyNames.PLATFORM} key.");
+                Thrower.Throw(new ArgumentException($"Properties does not contain {PropertyNames.CONFIG} or {PropertyNames.PLATFORM} key."));
+                return null;
             }
 
             foreach(var eProject in ValidProjects)
@@ -241,7 +250,8 @@ namespace net.r_eg.MvsSln.Core
 
             LSender.Send(this, $"Load project {pItem.pGuid}:{properties[PropertyNames.CONFIG]}|{properties[PropertyNames.PLATFORM]} :: '{pItem.name}' ('{pItem.fullPath}')", Message.Level.Info);
             if(String.IsNullOrWhiteSpace(pItem.fullPath)) {
-                throw new NotFoundException($"Path is empty to project ['{pItem.name}', '{pItem.pGuid}']");
+                Thrower.Throw(new NotFoundException($"Path is empty to project ['{pItem.name}', '{pItem.pGuid}']"));
+                return null;
             }
 
             return Load(pItem, properties);
@@ -256,7 +266,13 @@ namespace net.r_eg.MvsSln.Core
         public IDictionary<string, string> GetProjectProperties(ProjectItem pItem, IDictionary<string, string> slnProps)
         {
             if(!slnProps.ContainsKey(PropertyNames.CONFIG) || !slnProps.ContainsKey(PropertyNames.PLATFORM)) {
-                throw new ArgumentException("Solution Configuration or Platform is not defined in used properties.");
+                Thrower.Throw(new ArgumentException("Solution Configuration or Platform is not defined in used properties."));
+
+                return new Dictionary<string, string>(slnProps)
+                {
+                    [PropertyNames.CONFIG] = "",
+                    [PropertyNames.PLATFORM] = ""
+                };
             }
 
             var cfg = Sln.ProjectConfigs
@@ -373,7 +389,8 @@ namespace net.r_eg.MvsSln.Core
         public ProjectItemCfg ExtractItemCfg(Project project)
         {
             if(project == null) {
-                throw new ArgumentNullException(nameof(project));
+                Thrower.Throw(new ArgumentNullException(nameof(project)));
+                return new ProjectItemCfg();
             }
 
             foreach(ProjectItemCfg cfg in Sln.ProjectItemsConfigs)
@@ -422,7 +439,7 @@ namespace net.r_eg.MvsSln.Core
             foreach(var xp in Projects.ToArray())
             {
                 if(!Unload(xp) && throwIfErr) {
-                    throw new UnloadException<IXProject>($"Failed unload: '{xp.ProjectGuid}:{xp.ProjectItem.projectConfig}'", xp);
+                    Thrower.Throw(new UnloadException<IXProject>($"Failed unload: '{xp.ProjectGuid}:{xp.ProjectItem.projectConfig}'", xp));
                 }
             }
 
@@ -469,12 +486,14 @@ namespace net.r_eg.MvsSln.Core
         /// <param name="raw">Optional dictionary of raw xml projects by Guid.</param>
         public XProjectEnv(ISlnResult data, IDictionary<string, string> properties, IDictionary<string, RawText> raw = null)
         {
-            Sln             = data ?? throw new ArgumentNullException(nameof(data));
+            Sln             = data ?? null;
             rawXmlProjects  = raw;
 
+            Thrower.Throw(new ArgumentNullException(nameof(data)));
+
             slnProperties = DefProperties(
-                Sln.DefaultConfig,
-                Sln.Properties.ExtractDictionary
+                Sln?.DefaultConfig,
+                Sln?.Properties?.ExtractDictionary
             )
             .AddOrUpdate(properties);
         }
@@ -525,7 +544,12 @@ namespace net.r_eg.MvsSln.Core
 
         protected virtual Project Load(string path, IDictionary<string, string> properties)
         {
-            return new Project(path, properties, null, PrjCollection);
+            ProjectLoadSettings loadSettings = ProjectLoadSettings.Default;
+            if (!Thrower.ShouldThrowErrorsInStrictMode)
+            {
+                loadSettings = ProjectLoadSettings.IgnoreMissingImports;
+            }
+            return new Project(path, properties, null, PrjCollection, loadSettings);
         }
 
         protected IEnumerable<ProjectItemCfg> GetUniqPrjCfgs(IEnumerable<ProjectItemCfg> pItems)
